@@ -93,7 +93,9 @@ Dentro do loop, você adiciona ao batch, e ao atingir o limite, grava no MySQL.
 * Compatível com async/await: O loop não bloqueia a thread principal.
 
 # Resultado
-O projeto usa stream aliado ao processamento por lote - mais precisamente, um stream assíncrono com IAsyncEnumerable.
+* Tabela caged migrada
+* **14.552.432** de registros migrados em **42m 46s**
+- O projeto usa stream aliado ao processamento por lote - mais precisamente, um stream assíncrono com IAsyncEnumerable.
 Isso garante que possamos migrar até milhões de registros com uso de memória constante e controlado.
 
 # Próximos passos
