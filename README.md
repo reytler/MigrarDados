@@ -37,11 +37,11 @@ Este projeto é um **utilitário de console** desenvolvido em **.NET 9** que rea
 
 - ChangeTracker.Clear() após cada lote (libera memória).
 
-- Uso de transações para reduzir commits.
-
 - Retry automático com backoff exponencial em caso de erro.
 
 - Stopwatch para medir tempo e progresso da migração.
+
+- MultiThread para paralelisar o processo de escrita.
 
 ## 🧰 Tecnologias Utilizadas
 - .NET 9.0
@@ -73,6 +73,8 @@ Ele busca e processa registro por registro (ou pequenos blocos internos) conform
 
 Isso é o equivalente a um cursor no banco — leitura sob demanda.
 
+Além disso o processo de gravação foi paralelizado em 4 Threads diferentes otimizando o tempo de execução.
+
 👉 Essa é uma forma de streaming (fluxo de dados assíncrono) e é a maneira mais eficiente possível de percorrer um dataset muito grande no EF Core.
 
 ⚙️ Fluxo real no seu código
@@ -86,7 +88,9 @@ Isso é o equivalente a um cursor no banco — leitura sob demanda.
 3. await foreach (var item in ...)
 → Itera um registro por vez inserindo no Channel, sem carregar o resto do banco.
 
-Um consumidor do Channel grava no MySQL simultaneamente.
+4. Vários consumidores, um por thread(4 no total, podendo ser mais) consomem do Channel e gravam no MySQL simultaneamente.
+
+OBS.: O ```Channel<T>``` é Thread Safe, portanto não sofre Race Conditions.
 
 ## ✅ Benefícios do streaming aqui
 * Baixo consumo de memória: O EF Core só mantém alguns registros na RAM por vez.
@@ -95,10 +99,11 @@ Um consumidor do Channel grava no MySQL simultaneamente.
 * Compatível com async/await: O loop não bloqueia a thread principal.
 
 # Resultado
-* Tabela caged migrada com redução do tempo de **42m 46s** para **36m 23s**
+* Tabela caged migrada com redução do tempo de **42m 46s** para **36m 23s**, posteriormente com o paralelismo aplicado este tempo foi reduzido para **17m 59s**
 * **14.552.432** de registros migrados em **42m 46s**
 * ATUALIZAÇÃO(09/10/2025) **14.552.432** de registros migrados em **36m 23S**
-- O projeto usa stream mais precisamente, um stream assíncrono com IAsyncEnumerable e ```Channel<T>```.
+* ATUALIZAÇÃO 2 (09/10/2025) **14.552.432** de registros migrados em **17m 59S**
+- O projeto usa stream mais precisamente, um stream assíncrono com IAsyncEnumerable e ```Channel<T>``` mais paralelismo.
 Isso garante que possamos migrar até milhões de registros com uso de memória constante e controlado.
 
 # Próximos passos

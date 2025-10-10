@@ -9,6 +9,7 @@ namespace MigrarDados.Models;
 
 public class Caged
 {
+    [Key]
     public int Id { get; set; }
     [StringLength(10)]
     public string Secao {  get; set; }

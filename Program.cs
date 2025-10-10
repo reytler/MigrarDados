@@ -21,6 +21,7 @@ using var sqliteContext = new SQLiteContext(sqliteConnectionString);
 using var mysqlContext = new MySQLContext(mysqlConn);
 
 var initialCapacity = 2000;
+var numConsumidores = 4;
 
 var channel = Channel.CreateBounded<Caged>(new BoundedChannelOptions(initialCapacity)
 {
@@ -43,6 +44,7 @@ var stopwatchInsercao = new Stopwatch();
 
 var totalLidos = 0;
 var totalInseridos = 0;
+object lockInseridos = new();
 
 var produtor = Task.Run(async () =>
 {
@@ -69,42 +71,55 @@ var produtor = Task.Run(async () =>
     channel.Writer.Complete();
 });
 
-var consumidor = Task.Run(async () =>
-{
-    var batch = new List<Caged>();
+// ---------------------- Consumidores ----------------------
+var consumidores = new List<Task>();
 
-    await foreach (var registro in channel.Reader.ReadAllAsync())
+for (int i = 0; i < numConsumidores; i++)
+{ 
+    var consumidor = Task.Run(async () =>
     {
-        batch.Add(registro);
+        var batch = new List<Caged>();
+        var stopwatchInsercao = new Stopwatch();
 
-        if (batch.Count >= configStream.BatchSize)
+        await foreach (var registro in channel.Reader.ReadAllAsync())
         {
-            stopwatchInsercao.Start();
-            await InserirLoteAsync(mysqlContext, batch);
+            batch.Add(registro);
+
+            if (batch.Count >= configStream.BatchSize)
+            {
+                stopwatchInsercao.Restart();
+                var lote = batch.ToList();
+                await InserirLoteAsync(mysqlConn, lote);
+                
+                stopwatchInsercao.Stop();
+
+                var novoTotal = Interlocked.Add(ref totalInseridos, batch.Count);
+                Console.WriteLine($"✅ [Thread {Task.CurrentId}] Inseridos {novoTotal:N0} registros | lote {batch.Count} | tempo lote: {stopwatchInsercao.ElapsedMilliseconds}ms | buffer: {configStream.Capacity}");
+
+
+
+                AjustarParametros(configStream, stopwatchInsercao.ElapsedMilliseconds);
+                batch.Clear();
+            }
+        }
+
+        // Finaliza o que sobrou
+        if (batch.Count > 0)
+        {
+            stopwatchInsercao.Restart();
+            await InserirLoteAsync(mysqlConn, batch);
             stopwatchInsercao.Stop();
 
-            totalInseridos += batch.Count;
-            Console.WriteLine($"✅ Inseridos {totalInseridos:N0} registros | lote {batch.Count} | tempo: {stopwatchInsercao.ElapsedMilliseconds}ms | buffer: {configStream.Capacity}");
-
-            batch.Clear();
-
-            AjustarParametros(configStream, stopwatchInsercao.ElapsedMilliseconds);
+            var novoTotal = Interlocked.Add(ref totalInseridos, batch.Count);
+            Console.WriteLine($"✅ [Thread {Task.CurrentId}] Inseridos {novoTotal:N0} registros (final).");
         }
-    }
+    });
 
-    // Finaliza o que sobrou
-    if (batch.Count > 0)
-    {
-        stopwatchInsercao.Start();
-        await InserirLoteAsync(mysqlContext, batch);
-        stopwatchInsercao.Stop();
+    consumidores.Add(consumidor);
+}
 
-        totalInseridos += batch.Count;
-        Console.WriteLine($"✅ Inseridos {totalInseridos:N0} registros (final).");
-    }
-});
-
-await Task.WhenAll(produtor, consumidor);
+await Task.WhenAll(produtor);
+await Task.WhenAll(consumidores);
 stopwatchTotal.Stop();
 
 
@@ -116,8 +131,9 @@ Console.WriteLine($"Tempo total de inserção: {stopwatchInsercao.Elapsed}");
 Console.WriteLine($"Tempo total da migração: {stopwatchTotal.Elapsed}");
 
 
-static async Task InserirLoteAsync(MySQLContext context, List<Caged> registros)
+static async Task InserirLoteAsync(string mysqlConn, List<Caged> registros)
 {
+    using var context = new MySQLContext(mysqlConn);
     const int maxTentativas = 3;
     int tentativa = 0;
 
@@ -125,12 +141,8 @@ static async Task InserirLoteAsync(MySQLContext context, List<Caged> registros)
     {
         try
         {
-            using var transaction = await context.Database.BeginTransactionAsync();
-
             await context.Caged.AddRangeAsync(registros);
             await context.SaveChangesAsync();
-            await transaction.CommitAsync();
-
             context.ChangeTracker.Clear();
             return;
         }
